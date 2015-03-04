@@ -134,7 +134,10 @@
    [(fresh (a d)
            (== prop-env `(,a . ,d))
            (conde
-            [(== bot-prop a)]
+            [(== bot-prop a)
+             (conde
+              [(== bot-prop prop)] ;; helps infer props for conditional tests
+              [(== #t #t)])]
             ;; this case is handled at the end of the proves*o
             ;[(== top-prop prop)]
             [(fresh (t1 t2 v p)
@@ -611,15 +614,15 @@
     ; G, v1- |- e3 : t  ; v3+ | v3- ; o
     ; ----------------------------------------------
     ; G |- (if e1 e2 e3) : t ; v2+ v v3+ | v2- v v3- ; o
-    [(fresh (e1 e2 e3 tb1 tb2 G2 G3 G+ G-
-             t1 v1+ v1- v2+ v2- v3+ v3- o o1 o2 o3)
+    [(fresh (e1 e2 e3 tb2 tb3 G2 G3
+             t1 v1+ v1- v2+ v2- v3+ v3- o1 o2 o3)
        (== `(if ,e1 ,e2 ,e3) e)
        
        (infer G e1 t1 v1+ v1- o1)
        (extend-envo G v1+ G2)
        (extend-envo G v1- G3)
-       (infer G2 e2 tb1 v2+ v2- o2)
-       (infer G3 e3 tb2 v3+ v3- o3)
+       (infer G2 e2 tb2 v2+ v2- o2)
+       (infer G3 e3 tb3 v3+ v3- o3)
        
        (fresh (tact v+act v-act oact)
               (conde
@@ -633,7 +636,7 @@
                ;; unreachable then branch, use else branch type/props/object
                [(membero G2 bot-prop)
                 (not-membero G3 bot-prop)
-                (== tb1 tact)
+                (== tb3 tact)
                 (== v3+ v+act)
                 (== v3- v-act)
                 (== o3 oact)]
@@ -647,7 +650,7 @@
                ;; both branches reachable
                [(not-membero G2 bot-prop)
                 (not-membero G3 bot-prop)
-                (Uno tb1 tb2 tact)
+                (Uno tb2 tb3 tact)
                 (oro v2+ v3+ v+act)
                 (oro v2- v3- v-act)
                 (common-objo o2 o3 oact)])
@@ -727,7 +730,7 @@
       (run 2 (q)
            (subtypeo (-val #t) q)
            )
-      '(Any (val #t)))
+      '((val #t) Any))
 
 (test "proves"
       (run 1 (q)
@@ -774,43 +777,43 @@
       `(,empty-object))
 
 (test "plain #t, fresh props and o"
-      (run 2 (q)
+      (run 3 (q)
            (fresh (v+ v- o)
                   (infer '() #t q v+ v- o)))
-      '((val #t) Any ))
+      '((val #t) (val #t) Any ))
 
 (test "plain #t, fresh v- and o"
-      (run 2 (q)
+      (run 3 (q)
            (fresh (v+ v- o)
                   (infer '() #t q top-prop v- o)))
-      '((val #t) Any))
+      '((val #t) (val #t) Any))
 
 (test "plain #t, fresh o"
-      (run 2 (q)
+      (run 3 (q)
            (fresh (v+ v- o)
                   (infer '() #t q top-prop top-prop o)))
-      '((val #t) Any))
+      '((val #t) Any (val #t)))
 
-(test "plain #t, fresh o"
-      (run 2 (q)
+(test "plain #t, fresh o, accurate props"
+      (run 3 (q)
            (fresh (v+ v- o)
                   (infer '() #t q top-prop bot-prop o)))
-      '((val #t) Any))
+      '((val #t) (val #t) Any))
 
 (test "plain #t"
-  (run 2 (q)
+  (run 3 (q)
     (infer '() #t q top-prop bot-prop empty-object))
-  '((val #t) Any))
+  '((val #t) (val #t) Any))
 
-(test "good plain #f"
-  (run 2 (q)
+(test "good plain #f accurate props"
+  (run 3 (q)
     (infer '() #f q bot-prop top-prop empty-object))
-  '((val #f) Any))
+  '((val #f) (val #f) Any))
 
-(test "good plain #f"
-  (run 2 (q)
+(test "good plain #f, top-props"
+  (run 3 (q)
     (infer '() #f q top-prop top-prop empty-object))
-  '((val #f) Any))
+  '((val #f)  Any (val #f)))
 
 
 (test "bad plain #f concrete type"
@@ -827,16 +830,10 @@
 ;  '())
 
 (test "if, type #t"
-  (run 1 (q)
+  (run 3 (q)
     (fresh (v+ v- o)
            (infer '() '(if #t #t #t) q v+ v- o)))
-  '((val #t)))
-
-(test "if, type #t"
-  (run 1 (q)
-    (fresh (v+ v- o)
-           (infer '() '(if #t #t #f) q v+ v- o)))
-  `(,(Un (-val #t) (-val #f))))
+  '((val #t) (val #t) Any))
 
 (test "bad Bot"
   (run 1 (q)
@@ -897,7 +894,13 @@
                   (proveso `(,top-prop) q)))
       '(tt))
 
-(test "if, unreachable else branch bad type"
+(test "proveso infer bot-prop"
+      (run 3 (q)
+           (proveso `(,bot-prop) q))
+      `(,bot-prop _.0))
+
+;TODO
+#;(test "if, unreachable else branch bad type"
       (run 1 (q)
            (fresh (v+ v- o)
                   (infer '() '(if #t #t 1) Bot top-prop top-prop empty-object)))
@@ -912,6 +915,39 @@
   (run 1 (q)
     (infer '() '(if #f #t #t) q bot-prop top-prop empty-object))
   '())
+
+(test "number literal inference"
+      (run 3 (q)
+           (fresh (t v+ v- o)
+                  (== q `(,t ,v+ ,v- ,o))
+                  (infer '() 1 t v+ v- o)))
+      '(((val 1) tt ff empty) ((val 1) tt _.0 empty) (Any tt ff empty)))
+
+(test "true literal inference"
+      (run 3 (q)
+       (fresh (t v+ v- o)
+              (== q `(,t ,v+ ,v- ,o))
+              (infer '() #t t v+ v- o)))
+      '(((val #t) tt ff empty) ((val #t) tt _.0 empty) (Any tt ff empty)))
+
+(test "false literal inference"
+      (run 3 (q)
+           (fresh (t v+ v- o)
+                  (== q `(,t ,v+ ,v- ,o))
+                  (infer '() #f t v+ v- o)))
+      '(((val #f) ff tt empty) ((val #f) _.0 tt empty) (Any ff tt empty)))
+
+(test "inc inference"
+      (run 3 (q)
+       (fresh (t v+ v- o)
+              (== q `(,t ,v+ ,v- ,o))
+              (infer '() '(inc 1) t v+ v- o)))
+      '((Num tt ff empty) (Num tt _.0 empty) (Any tt ff empty)))
+
+(test "if then branch only type"
+      (run 2 (q)
+           (infer '() '(if #f #f #f) (-val #t) top-prop top-prop empty-object))
+      '())
 
 (test "no way to construct object"
       (run 100 (q)
