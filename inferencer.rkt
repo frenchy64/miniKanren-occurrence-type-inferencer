@@ -157,24 +157,180 @@
    [(=/= o1 o2)
     (== empty-object o2)]))
 
+;; assumes s is a val
+(define (val-overlapo s t b)
+  (valo s)
+  (conde
+   [(== s t)
+    (== b #t)]
+   [(=/= s t)
+    (conde
+     [(fresh (v1)
+             (== (-val v1) s)
+             (conde
+              [(numbero v1)
+               (conde
+                [(fresh (v2)
+                        (== (-val v2) t)
+                        (numbero v2)
+                        (=/= v1 v2)
+                        (== b #f))]
+                [(fresh (v2)
+                        (== (-val v2) t)
+                        (booleano v2)
+                        (== b #f))]
+                [(== Bool t)
+                 (== b #f)]
+                [(not-valo t)
+                 (=/= t Bool)
+                 (== b #t)])]
+              [(booleano v1)
+               (conde
+                [(fresh (v2)
+                        (== (-val v2) t)
+                        (booleano v2)
+                        (=/= v1 v2)
+                        (== b #f))]
+                [(fresh (v2)
+                        (== (-val v2) t)
+                        (numbero v2)
+                        (== b #f))]
+                [(== Num t)
+                 (== b #f)]
+                [(not-valo t)
+                 (=/= t Num)
+                 (== b #t)])]))])]))
+
+(define (valo t)
+  (fresh (v1)
+         (== (-val v1) t)))
+
+(define (not-valo t)
+  (fresh (tag tag2 v1 v2 v3 v4)
+         (conde
+          [(== `(,tag ,v1) t)
+           (=/= tag 'val)]
+          [(== `(,tag2 ,v2 ,v3 . ,v4) t)]
+          [(symbolo t)])))
+
+(define (bool-and b1 b2 b3)
+  (conde
+   [(== b1 #f) (== b3 #f)]
+   [(== b2 #f) (== b3 #f)]
+   [(== b1 #t)
+    (== b2 #t)
+    (== b3 #t)]))
+   
+;; conservative
+;; TODO unions
+(define (overlapo s t b)
+  (conde
+   [(== s t)
+    (== b #t)]
+   [(=/= s t)
+    (conde
+     ;; handle vals
+     [(fresh (b1 b2)
+         (conde
+          [(== b2 #t)
+           (val-overlapo t s b1)]
+          [(== b1 #t)
+           (val-overlapo s t b2)])
+         ;; if one of these are false then there is no overlap
+         (bool-and b1 b2 b))]
+     [(not-valo s)
+      (not-valo t)
+      (== b #t)])]))
+
+(test "overlap vals number"
+      (run 2 (q) (overlapo (-val 1) (-val 1) q))
+      '(#t))
+
+(test "bad val-overlapo vals number 1"
+      (run 2 (q) (val-overlapo (-val 1) (-val 2) q))
+      '(#f))
+
+(test "bad val-overlapo vals number 2"
+      (run 2 (q) (val-overlapo (-val 2) (-val 1)  q))
+      '(#f))
+
+(test "bad overlap vals number"
+      (run 5 (q) (overlapo (-val 1) (-val 2) q))
+      '(#f #f))
+
+(test "overlap vals"
+      (run 2 (q) (overlapo (-val #f) (-val #f) q))
+      '(#t))
+
+(test "bad overlap vals 1"
+      (run 5 (q) (overlapo (-val #f) (-val #t) q))
+      '(#f #f))
+
+(test "bad overlap vals 2"
+      (run 5 (q) (overlapo (-val #t) (-val #f)  q))
+      '(#f #f))
+
+(test "val-overlapo #f/Num"
+      (run 2 (q)
+           (val-overlapo (-val #f) Num q))
+      '(#f))
+
+(test "overlapo #f/Num"
+      (run 2 (q)
+           (overlapo (-val #f) Num q))
+      '(#f))
+                      
+(test "val-overlapo 1/Num"
+      (run 2 (q)
+           (val-overlapo (-val 1) Num q))
+      '(#t))
+
+(test "overlapo 1/Num"
+      (run 2 (q)
+           (overlapo (-val 1) Num q))
+      '(#t))
+
+(test "overlapo Top 1"
+      (run 2 (q)
+           (overlapo Top Num q))
+      '(#t))
+
+(test "overlapo Top 2"
+      (run 2 (q)
+           (overlapo Num Top q))
+      '(#t))
+
+(test "overlapo Bot 1"
+      (run 2 (q)
+           (overlapo Bot Num q))
+      '(#t))
+
+(test "overlapo Bot 2"
+      (run 2 (q)
+           (overlapo Num Bot q))
+      '(#t))
+
 (define (Uno s t r)
   (conde
    [(== s t)
     (== s r)]
    [(=/= s t) ;; this assumption is used below
     (conde
+     ;; use Top, helps disambiguate below
      [(conde
        [(== Top s)
         (== Bot t)]
        [(== Bot s)
         (== Top t)])
       (== Top r)]
+     ;; use s
      [(conde
        [(== Top s)
         (=/= Bot t)]
        [(== Bot t)
         (=/= Top s)])
       (== s r)]
+     ;; use t
      [(conde
        [(== Top t)
         (=/= Bot s)]
@@ -185,61 +341,78 @@
       (=/= Bot s) ;; neither are Bot
       (conde
        [(fresh (l1 r1)
-               (== (Un l1 r1) s)
                (=/= l1 t)
                (=/= r1 t)
+               (== (Un l1 r1) s)
+               (Uno l1 r1 s)
                (== r (Un s t)))]
        [(fresh (l1 r1)
-               (== (Un l1 r1) t)
                (=/= l1 s)
                (=/= r1 s)
+               (== (Un l1 r1) t)
+               (Uno l1 r1 t)
                (== r (Un s t)))]
-       [(subtypeo s t)
-        (== r s)]
-       [(subtypeo t s)
-        (== r t)]
        [(fresh (l1 l2 r1 r2)
-               (== r (Un s t))
-               (=/= (Un l1 r1) s)
-               (=/= (Un l2 r2) t))])])]))
+               (overlapo s t #f)
+               (== r (Un s t)))]
+       [(fresh ()
+               (overlapo s t #t)
+               (conde
+                [(subtypeo s t)
+                 (== r t)]
+                [(subtypeo t s)
+                 (== r s)]))])])]))
 
 ; Succeed if child-type is a subtype of parent-type,
 ; like (var #f) is a subtype of Bool.
 (define (subtypeo child-type parent-type)
   (conde
-   [(== child-type parent-type)]
-   [(== Bot child-type)
-    (=/= Bot parent-type)]
-   [(=/= child-type parent-type)
+   ;; going first helps inference
+   [(== child-type parent-type)
     (=/= Bot child-type)
+    (=/= Top child-type)]
+   [(== Bot child-type)
+    (== Top parent-type)]
+   [(== Bot child-type)
+    (=/= Top parent-type)]
+   [(=/= Bot child-type)
+    (== Top parent-type)]
+   [(=/= Bot child-type)
+    (=/= Top parent-type)
     (conde
-     [(== parent-type Top)]
-     [(fresh (t1 t2)
-             (== (Un t1 t2) child-type)
-             (subtypeo t1 parent-type)
-             (subtypeo t2 parent-type))]
-     [(fresh (t1 t2)
-             (== (Un t1 t2) parent-type)
-             (conde
-              [(subtypeo child-type t1)]
-              [(subtypeo child-type t2)]))]
-     [(fresh (b)
-             (== (-val b) child-type)
-             (conde
-              [(booleano b)
-               (== Bool parent-type)]
-              [(numbero b)
-               (== Num parent-type)]))]
-     [(fresh (arg1 ret1 v1+ v1- o1 arg2 ret2 v2+ v2- o2)
-             (== `(,arg1 -> ,ret1 ,v1+ ,v1- ,o1) child-type)
-             (== `(,arg2 -> ,ret2 ,v2+ ,v2- ,o2) parent-type)
-             (subobjo o1 o2)
-             (proveso v2+ v1+)
-             (proveso v2- v1-)
-             (subtypeo arg2 arg1)
-             (subtypeo ret1 ret2))])]))
-
-
+     [(=/= child-type parent-type)
+      (conde
+       [(fresh (t1 t2)
+               ;; must be the shape of a union but with the
+               ;; same rules as Uno
+               (== (Un t1 t2) child-type)
+               (Uno t1 t2 child-type)
+               (subtypeo t1 parent-type)
+               (subtypeo t2 parent-type))]
+       [(fresh (t1 t2)
+               ;; must be the shape of a union but with the
+               ;; same rules as Uno
+               (== (Un t1 t2) parent-type)
+               (Uno t1 t2 parent-type)
+               (conde
+                [(subtypeo child-type t1)]
+                [(subtypeo child-type t2)]))]
+       [(fresh (b)
+               (== (-val b) child-type)
+               (conde
+                [(booleano b)
+                 (== Bool parent-type)]
+                [(numbero b)
+                 (== Num parent-type)]))]
+       [(fresh (arg1 ret1 v1+ v1- o1 arg2 ret2 v2+ v2- o2)
+               (== `(,arg1 -> ,ret1 ,v1+ ,v1- ,o1) child-type)
+               (== `(,arg2 -> ,ret2 ,v2+ ,v2- ,o2) parent-type)
+               (subobjo o1 o2)
+               (proveso `(,v1+) v2+)
+               (proveso `(,v1-) v2-)
+               (subtypeo arg2 arg1)
+               (subtypeo ret1 ret2))])])]))
+     
 (test "Uno Top"
       (run 2 (q)
            (Uno Top Top q))
@@ -271,21 +444,49 @@
            (Uno Num (-val #f)  q))
       `(,(Un Num (-val #f))))
 
+(test "Uno overlap 1"
+      (run 3 (q)
+           (Uno (-val 1) Num q))
+      `(,Num))
+
+(test "Uno overlap 1"
+      (run 3 (q)
+           (Uno Num (-val 1) q))
+      `(,Num))
+
+(test "subtype reflexive"
+      (run 2 (q)
+           (subtypeo Num Num))
+      '(_.0))
+
+(test "subtype reflexive"
+      (run 2 (q)
+           (subtypeo Bool Bool))
+      '(_.0))
+
 
 (test "subtype function"
-      (run 1 (q)
+      (run 2 (q)
            (subtypeo q `(Num -> Num tt tt empty)))
-      '((Num -> Num tt tt empty)))
+      '((Num -> Num tt tt empty) Nothing))
+
+(test "subtype function contra expanded"
+      (run 2 (q)
+           (subtypeo Num Num)
+           (subtypeo (-val 1) Num)
+           
+           #;(subtypeo '(Num -> Num tt tt empty) '((val 1) -> Num tt tt empty)))
+      '(_.0))
 
 (test "subtype function contra"
-      (run 1 (q)
+      (run 2 (q)
            (subtypeo '(Num -> Num tt tt empty) '((val 1) -> Num tt tt empty)))
-      '())
+      '(_.0))
 
 (test "bad subtype function contra"
       (run 1 (q)
            (subtypeo '(Num -> Num tt tt empty) '((val #f) -> Num tt tt empty)))
-      '(_.0))
+      '())
 
 (test "subtype function rng"
       (run 1 (q)
@@ -307,6 +508,15 @@
            (subtypeo (-val #f) Bot))
       '())
 
+(test "Bot one supertype"
+      (run 2 (q)
+           (subtypeo Bot Num))
+      '(_.0))
+
+(test "Bot exactly 2 supertypes"
+      (run 3 (q)
+           (subtypeo Bot q))
+      '(Any (_.0 (=/= ((_.0 Any))))))
 
 (define (refineso s t b)
   (conde
@@ -514,10 +724,10 @@
       '(tt))
 
 (test "simple (val #t) proves"
-      (run 1 (q)
+      (run 2 (q)
            (subtypeo (-val #t) q)
            )
-      '((val #t)))
+      '(Any (val #t)))
 
 (test "proves"
       (run 1 (q)
@@ -564,43 +774,43 @@
       `(,empty-object))
 
 (test "plain #t, fresh props and o"
-      (run 1 (q)
+      (run 2 (q)
            (fresh (v+ v- o)
                   (infer '() #t q v+ v- o)))
-      '((val #t)))
+      '((val #t) Any ))
 
 (test "plain #t, fresh v- and o"
-      (run 1 (q)
+      (run 2 (q)
            (fresh (v+ v- o)
                   (infer '() #t q top-prop v- o)))
-      '((val #t)))
+      '((val #t) Any))
 
 (test "plain #t, fresh o"
-      (run 1 (q)
+      (run 2 (q)
            (fresh (v+ v- o)
                   (infer '() #t q top-prop top-prop o)))
-      '((val #t)))
+      '((val #t) Any))
 
 (test "plain #t, fresh o"
-      (run 1 (q)
+      (run 2 (q)
            (fresh (v+ v- o)
                   (infer '() #t q top-prop bot-prop o)))
-      '((val #t)))
+      '((val #t) Any))
 
 (test "plain #t"
-  (run 1 (q)
+  (run 2 (q)
     (infer '() #t q top-prop bot-prop empty-object))
-  '((val #t)))
+  '((val #t) Any))
 
 (test "good plain #f"
-  (run 1 (q)
+  (run 2 (q)
     (infer '() #f q bot-prop top-prop empty-object))
-  '((val #f)))
+  '((val #f) Any))
 
 (test "good plain #f"
-  (run 1 (q)
+  (run 2 (q)
     (infer '() #f q top-prop top-prop empty-object))
-  '((val #f)))
+  '((val #f) Any))
 
 
 (test "bad plain #f concrete type"
@@ -664,12 +874,18 @@
                   (infer `(,top-prop) #t Bot top-prop top-prop empty-object)))
       '())
 
+(test "bad transitive subtype"
+      (run 1 (q)
+           (subtypeo (-val #f) q)
+           (subtypeo q Num))
+      '())
+
 (test "simulate bad if, unreachable else branch with fresh type/props/object"
       (run 1 (q)
            (fresh (G t v+ v- o)
                   (== G `())
-                  (subtypeo (-val #f) t)
-                  (subtypeo t Num)
+                  (subtypeo (-val #f) q)
+                  (subtypeo q Num)
                   #;(check-belowo G
                                 t   v+       v-       o
                                 Bot top-prop top-prop empty-object)))
