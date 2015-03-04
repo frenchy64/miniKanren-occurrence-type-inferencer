@@ -384,6 +384,7 @@
     (=/= Top parent-type)
     (conde
      [(=/= child-type parent-type)
+      (not-valo parent-type)
       (conde
        [(fresh (t1 t2)
                ;; must be the shape of a union but with the
