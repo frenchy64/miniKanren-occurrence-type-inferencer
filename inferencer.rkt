@@ -157,47 +157,120 @@
    [(=/= o1 o2)
     (== empty-object o2)]))
 
+(define (Uno s t r)
+  (conde
+   [(== s t)
+    (== s r)]
+   [(=/= s t) ;; this assumption is used below
+    (conde
+     [(conde
+       [(== Top s)
+        (== Bot t)]
+       [(== Bot s)
+        (== Top t)])
+      (== Top r)]
+     [(conde
+       [(== Top s)
+        (=/= Bot t)]
+       [(== Bot t)
+        (=/= Top s)])
+      (== s r)]
+     [(conde
+       [(== Top t)
+        (=/= Bot s)]
+       [(== Bot s)
+        (=/= Top t)])
+      (== t r)]
+     [(=/= Top s)  ;; neither are Top
+      (=/= Bot s) ;; neither are Bot
+      (conde
+       [(fresh (l1 r1)
+               (== (Un l1 r1) s)
+               (=/= l1 t)
+               (=/= r1 t)
+               (== r (Un s t)))]
+       [(fresh (l1 r1)
+               (== (Un l1 r1) t)
+               (=/= l1 s)
+               (=/= r1 s)
+               (== r (Un s t)))]
+       [(subtypeo s t)
+        (== r s)]
+       [(subtypeo t s)
+        (== r t)]
+       [(fresh (l1 l2 r1 r2)
+               (== r (Un s t))
+               (=/= (Un l1 r1) s)
+               (=/= (Un l2 r2) t))])])]))
+
 ; Succeed if child-type is a subtype of parent-type,
 ; like (var #f) is a subtype of Bool.
 (define (subtypeo child-type parent-type)
   (conde
-    [(== child-type parent-type)]
-    [(== Bot child-type)
-     (=/= Bot parent-type)]
-    [(=/= child-type parent-type)
-     (=/= Bot child-type)
-     (conde
-      [(== parent-type Top)]
-      [(fresh (b)
-              (== (-val b) child-type)
-              (conde
-               [(booleano b)
-                (== Bool parent-type)]
-               [(numbero b)
-                (== Num parent-type)]))]
-      [(fresh (arg1 ret1 v1+ v1- o1 arg2 ret2 v2+ v2- o2)
-              (== `(,arg1 -> ,ret1 ,v1+ ,v1- ,o1) child-type)
-              (== `(,arg2 -> ,ret2 ,v2+ ,v2- ,o2) parent-type)
-              (subobjo o1 o2)
-              (proveso v2+ v1+)
-              (proveso v2- v1-)
-              (subtypeo arg2 arg1)
-              (subtypeo ret1 ret2))]
-      [(fresh (t1 t2)
-              (== (Un t1 t2) child-type)
-              (=/= t1 t2)
-              (=/= Bot t1)
-              (=/= Bot t2)
-              (subtypeo t1 parent-type)
-              (subtypeo t2 parent-type))]
-      [(fresh (t1 t2)
-              (== (Un t1 t2) parent-type)
-              (=/= t1 t2)
-              (=/= Bot t1)
-              (=/= Bot t2)
-              (conde
-               [(subtypeo child-type t1)]
-               [(subtypeo child-type t2)]))])]))
+   [(== child-type parent-type)]
+   [(== Bot child-type)
+    (=/= Bot parent-type)]
+   [(=/= child-type parent-type)
+    (=/= Bot child-type)
+    (conde
+     [(== parent-type Top)]
+     [(fresh (t1 t2)
+             (== (Un t1 t2) child-type)
+             (subtypeo t1 parent-type)
+             (subtypeo t2 parent-type))]
+     [(fresh (t1 t2)
+             (== (Un t1 t2) parent-type)
+             (conde
+              [(subtypeo child-type t1)]
+              [(subtypeo child-type t2)]))]
+     [(fresh (b)
+             (== (-val b) child-type)
+             (conde
+              [(booleano b)
+               (== Bool parent-type)]
+              [(numbero b)
+               (== Num parent-type)]))]
+     [(fresh (arg1 ret1 v1+ v1- o1 arg2 ret2 v2+ v2- o2)
+             (== `(,arg1 -> ,ret1 ,v1+ ,v1- ,o1) child-type)
+             (== `(,arg2 -> ,ret2 ,v2+ ,v2- ,o2) parent-type)
+             (subobjo o1 o2)
+             (proveso v2+ v1+)
+             (proveso v2- v1-)
+             (subtypeo arg2 arg1)
+             (subtypeo ret1 ret2))])]))
+
+
+(test "Uno Top"
+      (run 2 (q)
+           (Uno Top Top q))
+      `(,Top))
+
+(test "Uno Bot"
+      (run 2 (q)
+           (Uno Bot Bot q))
+      `(,Bot))
+
+
+(test "Uno Bot and Top 1"
+      (run 2 (q)
+           (Uno Top Bot q))
+      `(,Top))
+
+(test "Uno Bot and Top 2"
+      (run 2 (q)
+           (Uno Bot Top q))
+      `(,Top))
+
+(test "Uno val#f/Num"
+      (run 2 (q)
+           (Uno (-val #f) Num q))
+      `(,(Un (-val #f) Num)))
+
+(test "Uno Num/val#f"
+      (run 2 (q)
+           (Uno Num (-val #f)  q))
+      `(,(Un Num (-val #f))))
+
 
 (test "subtype function"
       (run 1 (q)
@@ -206,29 +279,34 @@
 
 (test "subtype function contra"
       (run 1 (q)
+           (subtypeo '(Num -> Num tt tt empty) '((val 1) -> Num tt tt empty)))
+      '())
+
+(test "bad subtype function contra"
+      (run 1 (q)
            (subtypeo '(Num -> Num tt tt empty) '((val #f) -> Num tt tt empty)))
       '(_.0))
 
-(define (Uno s t r)
-  (conde
-   [(fresh (l1 r1)
-           (== (Un l1 r1) s)
-           (=/= l1 t)
-           (=/= r1 t)
-           (== r (Un s t)))]
-   [(fresh (l1 r1)
-           (== (Un l1 r1) t)
-           (=/= l1 s)
-           (=/= r1 s)
-           (== r (Un s t)))]
-   [(subtypeo s t)
-    (== r s)]
-   [(subtypeo t s)
-    (== r t)]
-   [(fresh (l1 l2 r1 r2)
-           (== r (Un s t))
-           (=/= (Un l1 r1) s)
-           (=/= (Un l2 r2) t))]))
+(test "subtype function rng"
+      (run 1 (q)
+           (subtypeo '(Num -> (val 1) tt tt empty) '(Num -> Num tt tt empty)))
+      '(_.0))
+
+(test "bad subtype val"
+      (run 1 (q)
+           (subtypeo (-val #f) (-val #t)))
+      '())
+
+(test "bad subtype val #f/Num"
+      (run 1 (q)
+           (subtypeo (-val #f) Num))
+      '())
+
+(test "bad subtype Bot"
+      (run 1 (q)
+           (subtypeo (-val #f) Bot))
+      '())
+
 
 (define (refineso s t b)
   (conde
@@ -334,11 +412,36 @@
        (infer G3 e3 tb2 v3+ v3- o3)
        
        (fresh (tact v+act v-act oact)
-              (Uno tb1 tb2 tact)
-              (oro v2+ v3+ v+act)
-              (oro v2- v3- v-act)
-              (common-objo o2 o3 oact)
-              ;; this probably goes here
+              (conde
+               ;; both branches unreachable
+               [(membero G2 bot-prop)
+                (membero G3 bot-prop)
+                (== bot-prop v+act)
+                (== bot-prop v-act)
+                ;; and, object is unrestrained
+                (== Bot tact)]
+               ;; unreachable then branch, use else branch type/props/object
+               [(membero G2 bot-prop)
+                (not-membero G3 bot-prop)
+                (== tb1 tact)
+                (== v3+ v+act)
+                (== v3- v-act)
+                (== o3 oact)]
+               ;; unreachable else branch, use then branch type/props/object
+               [(not-membero G2 bot-prop)
+                (membero G3 bot-prop)
+                (== tb2 tact)
+                (== v2+ v+act)
+                (== v2- v-act)
+                (== o2 oact)]
+               ;; both branches reachable
+               [(not-membero G2 bot-prop)
+                (not-membero G3 bot-prop)
+                (Uno tb1 tb2 tact)
+                (oro v2+ v3+ v+act)
+                (oro v2- v3- v-act)
+                (common-objo o2 o3 oact)])
+              
               (check-belowo G
                             tact v+act v-act oact
                             t    v+    v-    o)))]
@@ -431,9 +534,34 @@
       '())
 
 (test "subobjo"
-      (run 1 (q)
+      (run 2 (q)
            (subobjo empty-object q))
       '(empty))
+
+(test "bad subobjo"
+      (run 3 (q)
+           (subobjo 'x q))
+      '(x empty))
+
+(test "common-objecto empty"
+      (run 2 (q)
+           (common-objo empty-object empty-object q))
+      '(empty))
+
+(test "common-objecto x"
+      (run 2 (q)
+           (common-objo 'x 'x q))
+      '(x))
+
+(test "common-objecto to empty left"
+      (run 2 (q)
+           (common-objo empty-object 'x q))
+      `(,empty-object))
+
+(test "common-objecto to empty right"
+      (run 2 (q)
+           (common-objo 'x empty-object q))
+      `(,empty-object))
 
 (test "plain #t, fresh props and o"
       (run 1 (q)
@@ -536,6 +664,17 @@
                   (infer `(,top-prop) #t Bot top-prop top-prop empty-object)))
       '())
 
+(test "simulate bad if, unreachable else branch with fresh type/props/object"
+      (run 1 (q)
+           (fresh (G t v+ v- o)
+                  (== G `())
+                  (subtypeo (-val #f) t)
+                  (subtypeo t Num)
+                  #;(check-belowo G
+                                t   v+       v-       o
+                                Bot top-prop top-prop empty-object)))
+      '())
+
 (test "proveso top-prop should only return one answer"
       (run* (q)
            (fresh (v+ v- o)
@@ -557,6 +696,12 @@
   (run 1 (q)
     (infer '() '(if #f #t #t) q bot-prop top-prop empty-object))
   '())
+
+(test "no way to construct object"
+      (run 100 (q)
+           (fresh (v+ v- o)
+                  (infer '() q Top top-prop top-prop 'x)))
+      '())
 
 (test "if, union #t #f"
   (run 1 (q)
